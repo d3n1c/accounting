@@ -4,7 +4,7 @@ function dncaccounting_report_menu(&$items) {
   $items['dncaccounting/report/journals'] = [
     'title' => 'Journals',
     'description' => 'Journals of transactions',
-    'access arguments' => ['view dnc accounting'],
+    'access arguments' => ['use dnc accounting'],
     'page callback' => 'dncaccounting_report_transactions',
     'file' => 'dncaccounting.report.inc',
     'type' => MENU_CALLBACK,
@@ -12,7 +12,7 @@ function dncaccounting_report_menu(&$items) {
   $items['dncaccounting/report/balances'] = [
     'title' => 'Balances',
     'description' => 'Balances of accounts',
-    'access arguments' => ['view dnc accounting'],
+    'access arguments' => ['use dnc accounting'],
     'page callback' => 'dncaccounting_report_balances',
     'file' => 'dncaccounting.report.inc',
     'type' => MENU_CALLBACK,
@@ -20,7 +20,7 @@ function dncaccounting_report_menu(&$items) {
   $items['dncaccounting/report/balances/%dncaccounting'] = [
     'title' => 'Balances Detail',
     'description' => 'Detail of account\'s balances',
-    'access arguments' => ['view dnc accounting'],
+    'access arguments' => ['use dnc accounting'],
     'page callback' => 'dncaccounting_report_balances_detail',
     'page arguments' => [3],
     'file' => 'dncaccounting.report.inc',
@@ -29,7 +29,7 @@ function dncaccounting_report_menu(&$items) {
   $items['dncaccounting/report/balance-sheet'] = [
     'title' => 'Balance Sheet',
     'description' => 'Balance sheet of accounts',
-    'access arguments' => ['view dnc accounting'],
+    'access arguments' => ['use dnc accounting'],
     'page callback' => 'dncaccounting_report_balance_sheet',
     'file' => 'dncaccounting.report.inc',
     'type' => MENU_CALLBACK,
@@ -37,7 +37,7 @@ function dncaccounting_report_menu(&$items) {
   $items['dncaccounting/report/profit-lost'] = [
     'title' => 'Profit or Lost',
     'description' => 'Report of profit or lost',
-    'access arguments' => ['view dnc accounting'],
+    'access arguments' => ['use dnc accounting'],
     'page callback' => 'dncaccounting_report_profit_lost',
     'file' => 'dncaccounting.report.inc',
     'type' => MENU_CALLBACK,

@@ -4,7 +4,7 @@ function dncaccounting_stock_menu(&$items) {
   $items['dncaccounting/report/stocks'] = [
     'title' => 'Stocks',
     'description' => 'Listing of stocks',
-    'access arguments' => ['view dnc accounting'],
+    'access arguments' => ['use dnc accounting'],
     'page callback' => 'dncaccounting_stock_report',
     'file' => 'dncaccounting.stock.inc',
     'type' => MENU_CALLBACK,
@@ -12,7 +12,7 @@ function dncaccounting_stock_menu(&$items) {
   $items['dncaccounting/report/stocks/%dncaccounting'] = [
     'title' => 'Stock Detail',
     'description' => 'Detail of stock',
-    'access arguments' => ['view dnc accounting'],
+    'access arguments' => ['use dnc accounting'],
     'page callback' => 'dncaccounting_stock_report_detail',
     'page arguments' => [3],
     'file' => 'dncaccounting.stock.inc',

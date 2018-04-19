@@ -1,0 +1,8 @@
+; $Id: dncaccounting.info,v 0.1 2018/4/1 16:35:58 denic Exp $
+name = DNC Accounting
+description = "DNC's system to handle accounting"
+dependencies[] = dncsystem
+dependencies[] = dncstorage
+package = DNC System
+version = 7.x-0.1-dev
+core = 7.x

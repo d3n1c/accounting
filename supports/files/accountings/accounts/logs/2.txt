@@ -1,0 +1,1 @@
+{"title":"Hutang","code":"2001","description":"Akun untuk menyimpan data hutang","normal":1,"nid":2,"updated":1524002745,"updater":"1","creator":"1","created":1524002745}

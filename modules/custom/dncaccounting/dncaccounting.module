@@ -1,0 +1,790 @@
+<?php
+
+/*
+ * Copyright (C) 2018 denic
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+ */
+
+/**
+ * Implementation of hook_load
+ * @return arg
+ **/
+function dncaccounting_load($arg) {
+  return check_plain($arg);
+}
+
+/**
+ * Implemented hook_permission
+ * to handle user access stricly
+ *
+ * @return array
+ */
+function dncaccounting_permission() {
+  return [
+    'view dnc accounting' => [
+      'title' => t('View DNC Accounting'),
+      'description' => t('Viewing DNC\'s System to handling accounting')
+    ],
+    'administer dnc accounting' => [
+      'title' => t('Administer DNC Accounting'),
+      'description' => t('Administer DNC\'s System to handling accounting')
+    ],
+    'use dnc accounting' => [
+      'title' => t('Use DNC Accounting'),
+      'description' => t('Use and manipulate data flow of DNC System to handling accounting')
+    ],
+  ];
+}
+
+function dncaccounting_structures_of_data($type = NULL) {
+  // types of data are text or integer or array or attachments or reference with content type information
+  // all ids are integer
+  $structures = [
+    'categories' => [
+      'title' => ['type' => 'text', 'required' => TRUE],
+      'code' => ['type' => 'text', 'required' => TRUE],
+      'description' => ['type' => 'text'],
+    ],
+    'commodities' => [
+      'title' => ['type' => 'text', 'required' => TRUE],
+      'code' => ['type' => 'text', 'required' => TRUE],
+      'category' => ['type' => 'reference', 'reference' => 'categories', 'required' => TRUE, 'widget' => 'select'],
+      'description' => ['type' => 'text'],
+      'unit' => ['type' => 'text', 'required' => TRUE],
+      'stocks' => ['type' => 'text'],
+      'quantity' => ['type' => 'int'],
+      'price' => ['type' => 'int'],
+    ],
+    'accounts' => [
+      'title' => ['type' => 'text', 'required' => TRUE],
+      'code' => ['type' => 'text'],
+      'description' => ['type' => 'text'],
+      'normal' => ['type' => 'int'], // 0 for debit, 1 for credit
+    ],
+    'transactions' => [
+      'title' => ['type' => 'text', 'required' => TRUE],
+      'time' => ['type' => 'text', 'required' => TRUE],
+      'total' => ['type' => 'int', 'required' => TRUE],
+      'pic' => ['type' => 'text'],
+      'annotation' => ['type' => 'text']
+    ],
+    'journals' => [
+      'title' => ['type' => 'text', 'required' => TRUE],
+      'account' => ['type' => 'reference', 'reference' => 'accounts', 'required' => TRUE, 'widget' => 'autocomplete'],
+      'time' => ['type' => 'text', 'required' => TRUE],
+      'transaction' => ['type' => 'reference', 'reference' => 'transactions', 'required' => TRUE, 'widget' => 'autocomplete'],
+      'action' => ['type' => 'int', 'required' => TRUE, 'widget' => 'radios'],
+      'worth' => ['type' => 'int', 'required' => TRUE],
+    ],
+    'scenarios' => [
+      'title' => ['type' => 'text', 'required' => TRUE],
+      'detail' => ['type' => 'text', 'required' => TRUE], // [{'account': 1, 'action': 1}, {"account': 5, 'action': 0}]
+    ],
+  ];
+  return empty($type) ? $structures : (empty($structures[$type]) ? NULL : $structures[$type]);
+}
+
+function dncaccounting_listing_view($type = NULL) {
+  $structures = [
+    'categories' => ['title', 'code', 'description'],
+    'commodities' => ['title', 'code', 'category', 'description', 'unit', 'quantity', 'price'],
+    'accounts' => ['title', 'code', 'description', 'normal'],
+    'transactions' => ['title', 'time', 'total'],
+    'journals' => ['title', 'account', 'time', 'transaction', 'action', 'worth'],
+    'scenarios' => ['title', 'detail'],
+  ];
+
+  return empty($type) ? $structures : (empty($structures[$type]) ? NULL : $structures[$type]);
+}
+
+/**
+ * Implementation of hook_menu
+ *
+ * @return array
+ */
+function dncaccounting_menu() {
+  $items = [];
+
+  module_load_include('inc', 'dncaccounting', 'dncaccounting.admin');
+  dncaccounting_admin_menu($items);
+  module_load_include('inc', 'dncaccounting', 'dncaccounting.reference');
+  dncaccounting_reference_menu($items);
+  module_load_include('inc', 'dncaccounting', 'dncaccounting.transaction');
+  dncaccounting_transaction_menu($items);
+  module_load_include('inc', 'dncaccounting', 'dncaccounting.report');
+  dncaccounting_report_menu($items);
+  module_load_include('inc', 'dncaccounting', 'dncaccounting.stock');
+  dncaccounting_stock_menu($items);
+  $items['dncaccounting/get-cookies'] = [
+    'title' => 'Get Cookies',
+    'description' => 'Retrieve all available cookies from all peer groups',
+    'access arguments' => ['use dnc pointofsale'],
+    'page callback' => 'dncaccounting_admin_get_cookies',
+    'file' => 'dncaccounting.admin.inc',
+    'type' => MENU_CALLBACK,
+  ];
+  $items['dncaccounting/search-autocomplete/%dncaccounting'] = [
+    'title' => 'Searching for Autocomplete',
+    'page callback' => 'dncaccounting_search_for_autocomplete',
+    'access arguments' => ['use dnc accounting'],  //or whatever permission makes sense
+    'page arguments' => [2],
+    'type' => MENU_CALLBACK,
+    'file' => 'dncaccounting.search.inc'
+  ];
+
+  return $items;
+}
+
+function dncaccounting_get_data($type, $nid = NULL, $justlist = TRUE, array $search = array(), $refextract = TRUE, array $range = []) {
+  $structure = dncaccounting_structures_of_data($type);
+  if (empty($structure)) {
+    unset ($structure);
+    return;
+  }
+
+  $result = dncstorage_get_data($type, $nid, $search, TRUE, $range);
+  
+  if (empty($result)) {
+    unset ($result, $structure);
+    return;
+  }
+
+  if (!empty($nid)) {
+    unset ($structure);
+    return $result;
+  }
+
+  $return = [];
+
+  if (!empty($justlist)) {
+    $vstructure = dncaccounting_listing_view($type);
+  }
+
+  foreach ($result as $keys => $values) {
+    foreach ($values as $key => $value) {
+      if (!empty($justlist) && !in_array($key, $vstructure)) {
+        continue;
+      }
+      if (!empty($structure[$key]['type']) && $structure[$key]['type'] == 'reference') {
+        $dump = dncstorage_get_data($structure[$key]['reference'], $value);
+        if (empty($dump)) {
+          continue;
+        }
+        if (!empty($refextract)) {
+          $value = $dump;
+        }
+        unset($dump);
+      }
+      $return[$keys][$key] = $value;
+    }
+  }
+  unset ($structure, $result);
+
+  if (!empty($justlist)) {
+    unset ($vstructure);
+  }
+
+  return $return;
+}
+
+function dncaccounting_save_updated_data($type, array $data = []) {
+  if (!user_access('use dnc accounting') && !user_access('administer dnc accounting')) {
+    return;
+  }
+  if (empty($data)) {
+    drupal_set_message(t('No data available'), 'error', FALSE);
+    return;
+  }
+
+  if (empty($data['nid'])) {
+    $max = dncstorage_get_max_id($type);
+    $data['nid'] = empty($max) ? 1 : ($max + 1);
+    unset ($max);
+    $new = $data['nid'];
+  }
+  $data = dncaccounting_set_data_type($type, $data);
+
+  $result = dncstorage_update_data($type, $GLOBALS['user']->uid, $data);
+
+  if (empty($result)) {
+    unset ($result, $new);
+    return;
+  }
+  
+  dncaccounting_update_listing($type, $result);
+  
+  if (!empty($new)) {
+    dncstorage_update_max_id($type, $new);
+    unset ($new);
+  }
+
+  return $result;
+}
+
+function dncaccounting_set_data_type($type, array $data = []) {
+  if (empty($data)) {
+    return;
+  }
+  
+  $structure = dncaccounting_structures_of_data($type);
+  if (empty($structure)) {
+    return $data;
+  }
+  
+  $result = [];
+  foreach ($data as $keys => $values) {
+    if (!empty($structure[$keys]['type'])) {
+      if (in_array($structure[$keys]['type'], ['int', 'integer', 'reference', 'time'])) {
+        settype($values, 'int');
+      }
+      elseif ($structure[$keys]['type'] == 'float') {
+        settype($values, 'float');
+      }
+    }
+    elseif (in_array($keys, ['nid', 'creator', 'created', 'updater', 'updated'])) {
+      settype($values, 'int');
+    }
+    $result[$keys] = $values;
+  }
+  unset ($structure);
+  
+  return $result;
+}
+
+function dncaccounting_update_listing($type, array $data = [], $remove = FALSE) {
+  if (empty($data)) {
+    drupal_set_message(t('No data available'), 'error', FALSE);
+    return;
+  }
+  
+  if (!empty($remove)) {
+    if (empty($data['nid'])) {
+      drupal_set_message(t('No ID information to remove data'), 'error', FALSE);
+      return;
+    }
+    $line = dncstorage_get_line_by_nid($type, 'listing', $data['nid']);
+    dncstorage_update_direct($type, 'listing', $line, $data, TRUE);
+    unset ($line);
+    return TRUE;
+  }
+  
+  $dump = $data;
+  if (!empty($data['nid'])) {
+    unset ($dump['nid']);
+  }
+  if (empty($dump)) {
+    unset ($dump);
+    drupal_set_message(t('No data available, just ID is not represent real data'), 'error', FALSE);
+    return;
+  }
+  unset ($dump);
+  
+  $listview = dncaccounting_listing_view($type);
+  if (empty($listview)) {
+    unset ($listview);
+    drupal_set_message(t('No listing view structure, we cannot process the data saving'), 'error', FALSE);
+    return;
+  }
+  $dump = [];
+  foreach ($data as $keys => $values) {
+    if (in_array($keys, $listview) || $keys == 'nid') {
+      $dump[$keys] = $values;
+    }
+  }
+  $data = $dump;
+  unset ($listview, $dump);
+
+  $line = NULL;
+  if (!empty($data['nid'])) {
+    $line = dncstorage_get_line_by_nid($type, 'listing', $data['nid']);
+  }
+  dncstorage_update_direct($type, 'listing', $line, $data);
+  unset ($line);
+  
+  return TRUE;
+}
+
+function dncaccounting_delete_data($type, $nid) {
+  $nid = !is_array($nid) ? [$nid] : $nid;
+  if (empty($nid)) {
+    return;
+  }
+  
+  $result = dncstorage_delete_data($type, $GLOBALS['user']->uid, $nid);
+  if (empty($result)) {
+    unset ($result);
+    return;
+  }
+  
+  foreach ($nid as $values) {
+    dncaccounting_update_listing($type, ['nid' => $values], TRUE);
+  }
+  
+  return $result;
+}
+
+function dncaccounting_init() {
+  drupal_add_js(libraries_get_path('jstorage') . '/jstorage.min.js', array(
+    'scope' => 'footer',
+    'weight' => 80
+  ));
+  drupal_add_js(libraries_get_path('notifyjs') . '/notify.min.js', [
+    'scope' => 'footer',
+    'weight' => 110
+  ]);
+  drupal_add_js(libraries_get_path('vue') . '/vue.min.js', array(
+    'scope' => 'footer',
+    'weight' => 120
+  ));
+}
+
+function dncaccounting_prepare_transaction() {
+  drupal_add_css(libraries_get_path('bootstrap-datepicker') . '/dist/css/bootstrap-datepicker.min.css');
+  
+  drupal_add_js(libraries_get_path('v-money') . '/dist/v-money.js', array(
+    'scope' => 'footer',
+    'weight' => 122
+  ));
+  drupal_add_js(libraries_get_path('bootstrap-datepicker') . '/dist/js/bootstrap-datepicker.min.js', [
+    'scope' => 'footer',
+    'weight' => 126
+  ]);
+  $script = '
+    [v-cloak] {
+      display: none;
+    }
+    #overlay {
+        position: fixed;
+        width: 100%;
+        height: 100%;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: rgba(0,0,0,0.5);
+        z-index: 20;
+        cursor: pointer;
+    }
+    .overlay-body {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        font-size: 50px;
+        color: white;
+        transform: translate(-50%,-50%);
+        -ms-transform: translate(-50%,-50%);
+        text-align: center;
+    }
+  ';
+  drupal_add_css($script, array(
+    'type' => 'inline',
+  ));
+  unset ($script);
+}
+
+function dncaccounting_block_info() {
+  $block = [];
+  $block['dncaccountqueue'] = [
+    'info' => t('DNC Accounting Queue')
+  ];
+  $block['dncaccountqueueaction'] = [
+    'info' => t('DNC Accounting Queue Action')
+  ];
+  $block['dncaccountingbalances'] = [
+    'info' => t('DNC Accounting Balances')
+  ];
+  return $block;
+}
+
+function dncaccounting_block_configure($delta = '') {
+  $form = [];
+  if ($delta == 'dncaccountingbalances') {
+    $default = variable_get('dncaccounting_block_show_balances', []);
+    $options = [];
+    $accounts = dncaccounting_get_data('accounts');
+    if (!empty($accounts)) {
+      foreach ($accounts as $keys => $values) {
+        $options[$keys] = $values['title'];
+      }
+    }
+    unset ($accounts);
+    $form['dncaccounting_block_show_balances'] = [
+      '#type' => 'checkboxes',
+      '#title' => t('Accounts'),
+      '#description' => t('Account\'s balanced that will be displayed in block'),
+      '#options' => $options,
+      '#default_value' => empty($default) ? [] : $default
+    ];
+    unset ($options, $default);
+  }
+  return $form;
+}
+
+function dncaccounting_block_save($delta = '', array $edit = []) {
+  if ($delta == 'dncaccountingbalances') {
+    if (!empty($edit['dncaccounting_block_show_balances'])) {
+      $shows = [];
+      foreach ($edit['dncaccounting_block_show_balances'] as $keys => $values) {
+        if (!empty($values)) {
+          if (!in_array($keys, $shows)) {
+            $shows[] = $keys;
+          }
+        }
+      }
+      sort($shows);
+      variable_set('dncaccounting_block_show_balances', $shows);
+      unset ($shows);
+    }
+  }
+}
+
+function dncaccounting_block_view($delta = '') {
+  $block = [];
+  switch ($delta) {
+    case 'dncaccountqueue':
+      $block['content'] = dncaccounting_show_queue();
+      break;
+    case 'dncaccountqueueaction':
+      $block['content'] = dncaccounting_show_queue_action();
+      break;
+    case 'dncaccountingbalances':
+      $block['content'] = dncaccounting_show_balances_block();
+      break;
+  }
+  return $block;
+}
+
+function dncaccounting_show_queue() {
+  $script = [];
+  $script[] = '';
+  $script[] = '$(document).ready(function showQueue() {';
+  $script[] = "\t" . 'var transactions = $.jStorage.get(\'accountingtrans\', \'\');';
+  $script[] = "\t" . 'if (transactions.length) {';
+  $script[] = "\t\t" . '$(\'#tbadge\').show();';
+  $script[] = "\t\t" . '$(\'#trqueue\').html(transactions.length);';
+  $script[] = "\t" . '}';
+  $script[] = "\t" . 'else {';
+  $script[] = "\t\t" . '$(\'#tbadge\').hide();';
+  $script[] = "\t" . '}';
+  $script[] = "\t" . 'setTimeout(showQueue, 3000);';
+  $script[] = '});';
+  $script[] = '';
+  drupal_add_js(implode("\n", $script), array(
+    'type' => 'inline',
+    'scope' => 'footer',
+    'weight' => 125
+  ));
+  unset ($script);
+
+  $output = [];
+
+  $output[] = "\t" . '<i class="icon-layers"></i>';
+  $output[] = "\t" . '<a class="nav-link" href="#" id="tbadge">';
+  $output[] = "\t\t" . '<span class="badge badge-pill badge-danger" id="trqueue"></span>';
+  $output[] = "\t" . '</a>';
+
+  return implode("\n", $output);
+}
+
+function dncaccounting_show_queue_action() {
+  $script = '
+    $(document).ready(function showQueue() {
+      var acctrans = $.jStorage.get(\'accountingtrans\', \'\');
+      if (acctrans.length) {
+        var trans = acctrans[0];
+        // sending trans to server
+        $.post(\'' . base_path() . 'dncaccounting/transaction-post\', {"data": trans}, function(data, status) {
+          if (status === "success" && data[\'result\'] == true) {
+            // console.log(JSON.stringify(data));
+            acctrans.splice(0, 1);
+            if (acctrans.length) {
+              $.jStorage.set(\'accountingtrans\', acctrans);
+            }
+            else {
+              $.jStorage.deleteKey(\'accountingtrans\');
+            }
+            $.notify(
+              \'One transaction is successfully processed\',
+              {
+                className:"warning",
+                globalPosition:"top center"
+              }
+            );
+          }
+        });
+      }
+      setTimeout(showQueue, 20000);
+    });
+  ';
+  drupal_add_js($script, array(
+    'type' => 'inline',
+    'scope' => 'footer',
+    'weight' => 135
+  ));
+  unset ($script);
+
+  $output = [];
+  $output[] = "\t\t" . '<i class="fa fa-circle-o-notch fa-spin"></i> processing transactions';
+  return implode("\n", $output);
+}
+
+function dncaccounting_get_cookie($type) {
+  if (!in_array($type, ['pos', 'stock'])) {
+    return;
+  }
+  $gconfigs = variable_get('dncaccounting_configs');
+  if (empty($gconfigs[$type . '_agent'])) {
+    unset ($gconfigs);
+    return;
+  }
+  $nid = $gconfigs[$type . '_agent'];
+  unset ($gconfigs);
+  
+  if (!dncsessclient_check_available_server($nid)) {
+    unset ($nid);
+    return;
+  }
+  
+  $cred = dncsessclient_get_credentials($nid);
+  if (empty($cred['nid'])) {
+    unset ($cred, $nid);
+    return;
+  }
+  unset ($nid);
+  
+  if (empty($cred['cookie']) || empty($cred['csrf_token']) || !dncsessclient_check_valid_cookie($cred)) {
+    dncsessclient_login($cred);
+    $cred = dncsessclient_get_credentials($cred['nid']);
+  }
+  
+  return [
+    'cookie' => $cred['cookie'],
+    'token' => $cred['csrf_token'],
+    'url' => $cred['detail']['baseurl'] . '/' . $cred['detail']['service_path']
+  ];
+}
+
+function dncaccounting_get_identity_numdigit() {
+  $suffix = $GLOBALS['user']->sid;
+  $suffix .= drupal_get_hash_salt();
+  return crc32($suffix);
+}
+
+function dncaccounting_get_fixed_account_names() {
+  return ['cash', 'inventories', 'cost_of_good_sold', 'debt', 'sale', 'account_receivable', 'cost', 'capital'];
+}
+
+function dncaccounting_cron() {
+  dncaccounting_count_balances();
+}
+
+function dncaccounting_count_balance_of_transaction($nid, &$balances) {
+  $accounts = dncaccounting_get_data('accounts');
+  if (empty($accounts)) {
+    unset ($accounts);
+    return;
+  }
+  
+  $journals = dncaccounting_get_data('journals', NULL, FALSE, [
+    'type' => 'field',
+    'fields' => ['transaction' => $nid]
+  ], FALSE);
+  if (!empty($journals)) {
+    foreach ($journals as $keys => $values) {
+      if (empty($accounts[$values['account']])) {
+        continue;
+      }
+      $balances[$values['account']] = empty($balances[$values['account']]) ? 0 : $balances[$values['account']];
+      if ($values['action'] != $accounts[$values['account']]['normal']) {
+        $balances[$values['account']] -= $values['worth'];
+      }
+      else {
+        $balances[$values['account']] += $values['worth'];
+      }
+    }
+  }
+  unset ($journals, $balances, $accounts);
+  return $balances;
+}
+
+function dncaccounting_count_balances() {
+  $accounts = dncaccounting_get_data('accounts', NULL);
+  if (empty($accounts)) {
+    unset ($accounts);
+    return;
+  }
+  
+  $balances = dncaccounting_account_balances();
+  $balances = empty($balances) ? [] : $balances;
+  
+  $tlast = variable_get('dncaccounting_lastT_balance', 0);
+  $max = dncstorage_get_max_id('transactions');
+  if ($tlast < $max) {
+    $tlast ++;
+    for ($i = $tlast; $i <= $max; $i++) {
+      dncaccounting_count_balance_of_transaction($i + 1, $balances);
+    }
+    dncaccounting_account_balances(NULL, FALSE, $balances);
+    variable_set('dncaccounting_lastT_balance', $max);
+  }
+//  watchdog('recounting', '<pre>@print</pre>', ['@print' => print_r([$tlast, $max, $accounts], TRUE)]);
+  unset ($tlast, $accounts, $max, $balances);
+  
+  return TRUE;
+}
+
+function dncaccounting_account_balances($account = NULL, $flush = FALSE, array $update = []) {
+  $file = 'public://dncaccounting_balances.json';
+  $file = drupal_realpath($file);
+  
+  if (empty($account) && !empty($flush)) {
+    variable_del('dncaccounting_lastT_balance');
+    clearstatcache();
+    if (is_file($file)) {
+      unlink($file);
+    }
+    unset ($file);
+    return;
+  }
+  
+  if (!empty($update)) {
+    file_put_contents($file, json_encode($update), LOCK_EX);
+    unset ($file);
+    return TRUE;
+  }
+  
+  clearstatcache();
+  if (!is_file($file)) {
+    return;
+  }
+  
+  $result = file_get_contents($file);
+  unset ($file);
+  $result = json_decode($result, TRUE);
+  
+  return empty($result) ? NULL : (empty($account) ? $result : (empty($result[$account]) ? NULL : $result[$account]));
+}
+
+function dncaccounting_get_profit() {
+  $profit = 0;
+  $balances = dncaccounting_account_balances();
+  if (!empty($balances)) {
+    $rtype = variable_get('dncaccounting_account_rtypes', []);
+    foreach ($balances as $keys => $values) {
+      if (!empty($rtype[$keys])) {
+        $account = dncaccounting_get_data('accounts', $keys);
+        if (!empty($account['title'])) {
+          if (!empty($account['normal'])) {
+            $profit += $values;
+          }
+          else {
+            $profit -= $values;
+          }
+        }
+        unset ($account);
+      }
+    }
+    unset ($rtype);
+  }
+  unset ($balances);
+  return $profit;
+}
+
+function dncaccounting_show_balances_block() {
+  $accshows = variable_get('dncaccounting_block_show_balances', []);
+  if (empty($accshows)) {
+    unset ($accshows);
+    return '';
+  }
+  
+  $balances = dncaccounting_account_balances();
+  
+  $aoutput = [];
+  $aoutput[] = '<ul>';
+  foreach ($accshows as $keys => $values) {
+    $account = dncaccounting_get_data('accounts', $values);
+    if (!empty($account['title'])) {
+      $aoutput[] = '<li>' . $account['title'] . ': Rp. <strong>' . (empty($balances[$values]) ? 0 : number_format($balances[$values], 0, ',', '.')) . '</strong></li>';
+    }
+    unset ($account);
+  }
+  unset ($accshows, $balances);
+  $aoutput[] = '</ul>';
+  
+  $output = [];
+  $profit = dncaccounting_get_profit();
+  $output[] = '<h4><strong style="color: ' . ($profit < 0 ? 'red;">' . t('Lost') : 'black;">' . t('Profit')) . ': ' . number_format($profit, 0, ',', '.') . '</strong></h4>';
+  
+  $output[] = implode("\n", $aoutput);
+  unset ($aoutput);
+  
+  return implode("\n", $output);
+}
+
+function dncaccounting_prepare_datatables_js() {
+  drupal_add_css(libraries_get_path('datatables') . '/media/css/jquery.dataTables.css');
+  drupal_add_js(libraries_get_path('datatables') . '/media/js/jquery.dataTables.min.js', [
+    'scope' => 'footer',
+    'weight' => 150
+  ]);
+  $js = "
+    $(document).ready(function() {
+        $('#dncaccounting-table').DataTable();
+    } );
+  ";
+  drupal_add_js($js, [
+    'type' => 'inline',
+    'scope' => 'footer',
+    'weight' => 160
+  ]);
+  unset ($js);
+}
+
+function dncaccounting_recount_balance_exec($nid, &$context) {
+  if (empty($context['results'])) {
+    $balances = dncaccounting_account_balances();
+    $balances = empty($balances) ? [] : $balances;
+    $context['results']['balances'] = $balances;
+  }
+  
+  $balances = empty($balances) ? $context['results']['balances'] : $balances;
+  dncaccounting_count_balance_of_transaction($nid, $balances);
+  
+  $context['results']['balances'] = $balances;
+  unset ($balances);
+}
+
+function dncaccounting_recount_balance_finished($success, $results, $operations) {
+  if ($success) {
+    if (empty($results['balances'])) {
+      drupal_set_message(t('Counting balance report is failed'), 'error', FALSE);
+      drupal_goto('dncaccounting/report/balances');
+      return;
+    }
+    dncaccounting_account_balances(NULL, FALSE, $results['balances']);
+    $max = dncstorage_get_max_id('transactions');
+    variable_set('dncaccounting_lastT_balance', $max);
+    sleep(10);
+    drupal_set_message(t('Balance report is ready'));
+    drupal_goto('dncaccounting/report/balances');
+  }
+  else {
+    // An error occurred.
+    // $operations contains the operations that remained unprocessed.
+    $error_operation = reset($operations);
+    drupal_set_message(t('An error occurred while processing @operation with arguments : @args', array('@operation' => $error_operation[0], '@args' => print_r($error_operation[0], TRUE))));
+  }
+}

@@ -1,0 +1,528 @@
+<?php
+
+/*
+ * Copyright (C) 2017 denic
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+ */
+
+/**
+ * Implementation of hook_load
+ * @return arg
+ **/
+function dncsessclient_load($arg) {
+  return check_plain($arg);
+}
+
+/**
+ * Implementation of hook_menu
+ *
+ * @return array
+ */
+function dncsessclient_menu() {
+  $items = array();
+  $items['admin/config/dncsystem/dncsessclient'] = array(
+    'title' => 'Session Client',
+    'description' => 'Settings for DNC\'s System to handling communication with antoher session authenticated drupal site',
+    'position' => 'right',
+    'weight' => 0,
+    'page callback' => 'system_admin_menu_block_page',
+    'access arguments' => array('administer site configuration'),
+    'file' => 'system.admin.inc',
+    'file path' => drupal_get_path('module', 'system'),
+    );
+  $items['admin/config/dncsystem/dncsessclient/global'] = array(
+    'title' => 'Global Params',
+    'description' => 'Working plan parameters and configurations',
+    'access arguments' => array('administer site configuration'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('dncsessclient_admin_params'),
+    'file' => 'dncsessclient.admin.inc',
+  );
+  $items['admin/structure/dncsystem/dncsessclient'] = array(
+    'title' => 'Session Client\'s Credentials',
+    'description' => 'Manage DNC\'s session client\'s credentials',
+    'access arguments' => array('administer dnc system'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('dncsessclient_manager'),
+    'file' => 'dncsessclient.admin.inc',
+  );
+  $items['admin/structure/dncsystem/dncsessclient/add'] = array(
+    'title' => 'Add',
+    'description' => 'Add DNC\'s session client\'s credential',
+    'access arguments' => array('administer dnc system'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('dncsessclient_manager_add'),
+    'file' => 'dncsessclient.admin.inc',
+    'type' => MENU_LOCAL_ACTION,
+  );
+  $items['admin/structure/dncsystem/dncsessclient-update/%dncsessclient'] = array(
+    'title' => 'Edit',
+    'description' => 'Add DNC\'s session client\'s credential',
+    'access arguments' => array('administer dnc system'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('dncsessclient_manager_edit', 4),
+    'file' => 'dncsessclient.admin.inc',
+    'type' => MENU_CALLBACK,
+  );
+  $items['dncsessclient-login/%dncsessclient'] = array(
+    'title' => 'Login',
+    'description' => 'Login to remote server by session client\'s credential',
+    'access callback' => 'user_is_logged_in',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('dncsessclient_login_form', 1),
+    'type' => MENU_CALLBACK,
+  );
+  $items['dncsessclient-logout/%dncsessclient'] = array(
+    'title' => 'Logout',
+    'description' => 'Logout to remote server by session client\'s credential',
+    'access callback' => 'user_is_logged_in',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('dncsessclient_logout_form', 1),
+    'type' => MENU_CALLBACK,
+  );
+
+  return $items;
+}
+
+/**
+ * Get content type scheme that be used in the system
+ * It can be source of the script or result from converting action
+ *
+ * @param boolean $localConvert
+ *   True will get the result convert, or false for the source
+ * @param array $field
+ *   Source field name, can be array, string or NULL
+ *   This param will limit the output result on given field name
+ *
+ * @return array
+ *   Resulting scheme of source or convert result
+ */
+function dncsessclient_content_type_schema_vars($localConvert = FALSE, $field = NULL, $justinfos = FALSE, $justsettings = FALSE) {
+  $fieldsettings = array(
+    'dncsessclientcreds' => array(
+      'title' => array('property'),
+      'detail' => array('text_long', FALSE),
+      'cookie' => array('text_long', FALSE),
+      'csrf_token' => array('text_long', FALSE),
+      'datetime' => array('text', FALSE),
+    ),
+  );
+  if (!empty($justsettings)) {
+    return $fieldsettings;
+  }
+
+  $source = array();
+  foreach ($fieldsettings as $keys => $values) {
+    if (!empty($values)) {
+      foreach ($values as $key => $value) {
+        $source[$keys][] = $key;
+      }
+    }
+  }
+
+  if ($localConvert !== FALSE) {
+    $dump = dncctypevars_get_ctype_scheme_vars('dncsessclient', $source);
+    $source = NULL;
+    if(!empty($dump)) {
+      foreach ($dump as $keys => $values) {
+        if (!empty($values['content_type'])) {
+          $filled = TRUE;
+          break;
+        }
+      }
+      if (!empty($filled)) {
+        $source = $dump;
+      }
+      unset ($filled);
+    }
+    unset ($dump);
+  }
+  else {
+    if ($justinfos !== FALSE) {
+      $source = dncctypevars_get_scheme_infos('dncsessclient', $source);
+    }
+  }
+  return empty($field) ? $source : (empty($source[$field]) ? NULL : $source[$field]);
+}
+
+function dncsessclient_check_available_server($nid) {
+  $cred = dncsessclient_get_credentials($nid);
+  if (empty($cred)) {
+    unset ($cred);
+    return;
+  }
+  $domain = dncsystem_get_hostname_by_url($cred['detail']['baseurl']);
+  $curlInit = curl_init($domain);
+  curl_setopt($curlInit,CURLOPT_CONNECTTIMEOUT,10);
+  curl_setopt($curlInit,CURLOPT_HEADER,true);
+  curl_setopt($curlInit,CURLOPT_NOBODY,true);
+  curl_setopt($curlInit,CURLOPT_RETURNTRANSFER,true);
+
+  //get answer
+  $response = curl_exec($curlInit);
+
+  curl_close($curlInit);
+  if ($response) return TRUE;
+
+  return FALSE;
+  unset ($domain);
+}
+
+function dncsessclient_get_credentials($nid = NULL, $title = NULL) {
+  $scheme = dncsessclient_content_type_schema_vars(TRUE, 'dncsessclientcreds');
+  if (empty($scheme['content_type']) || empty($scheme['fields'])) {
+    unset ($scheme);
+    return;
+  }
+
+  $options = [];
+  $econfigs = encrypt_get_default_config();
+
+  if (!empty($nid)) {
+    $node = node_load($nid);
+    $data = dncsystem_retrieve_node_data($scheme, $node, NULL, NULL, TRUE);
+    if (empty($data['detail'])) {
+      unset ($data, $node, $scheme);
+      return;
+    }
+    unset ($node, $scheme);
+    $data['detail'] = base64_decode($data['detail']);
+    $data['detail'] = decrypt($data['detail'], $options, $econfigs['method'], $econfigs['provider']);
+    $data['detail'] = json_decode($data['detail'], TRUE);
+    if (!empty($data['cookie'])) {
+      $data['cookie'] = base64_decode($data['cookie']);
+      $data['cookie'] = decrypt($data['cookie'], $options, $econfigs['method'], $econfigs['provider']);
+    }
+    if (!empty($data['csrf_token'])) {
+      $data['csrf_token'] = base64_decode($data['csrf_token']);
+      $data['csrf_token'] = decrypt($data['csrf_token'], $options, $econfigs['method'], $econfigs['provider']);
+    }
+    return $data;
+  }
+
+  $query = new EntityFieldQuery();
+  $query->entityCondition('entity_type', 'node');
+  $query->entityCondition('bundle', $scheme['content_type']);
+  if (!empty($title)) {
+    $query->propertyCondition('title', $title);
+  }
+  else {
+    $query->propertyCondition('status', NODE_PUBLISHED);
+  }
+  $query->addMetaData('account', user_load(1));
+  $result = $query->execute();
+  unset ($query);
+
+  if (empty($result['node'])) {
+    unset ($scheme, $result);
+    return;
+  }
+
+  $nodes = node_load_multiple(array_keys($result['node']));
+  $result = [];
+  // echo '<pre>'; print_r($nodes); echo '</pre>'; exit;
+
+  foreach ($nodes as $node) {
+    $data = dncsystem_retrieve_node_data($scheme, $node, NULL, NULL, TRUE);
+    if (!empty($data['nid'])) {
+      $result[$node->nid] = $data;
+      // $result[$node->nid]['datetime'] = empty($data['datetime']) ? NULL : $data['datetime'];
+      $creds = base64_decode($data['detail']);
+      $creds = decrypt($creds, $options, $econfigs['method'], $econfigs['provider']);
+      $creds = json_decode($creds, TRUE);
+      if (!empty($creds)) {
+        $result[$node->nid]['detail'] = [];
+        foreach ($creds as $keys => $values) {
+          $result[$node->nid]['detail'][$keys] = $values;
+        }
+      }
+      if (!empty($data['cookie'])) {
+        $creds = base64_decode($data['cookie']);
+        $creds = decrypt($creds, $options, $econfigs['method'], $econfigs['provider']);
+        $result[$node->nid]['cookie'] = $creds;
+      }
+      if (!empty($data['csrf_token'])) {
+        $creds = base64_decode($data['csrf_token']);
+        $creds = decrypt($creds, $options, $econfigs['method'], $econfigs['provider']);
+        $result[$node->nid]['csrf_token'] = $creds;
+      }
+      unset ($creds);
+      if (!empty($title)) {
+        unset ($data);
+        return $result[$node->nid];
+      }
+    }
+    unset ($data);
+  }
+
+  unset ($scheme, $nodes, $node, $options, $econfigs);
+  return $result;
+}
+
+function dncsessclient_login($cred) {
+  if (empty($cred)) {
+    unset ($cred);
+    return;
+  }
+  if (!empty($cred['cookie'])) {
+    if (dncsessclient_check_valid_cookie($cred)) {
+      unset ($cred);
+      return;
+    }
+  }
+
+  $result = NULL;
+
+  $csrf_token = dncsessclient_get_csrf_token($cred['detail']);
+
+  $credentials = [];
+  $credentials['username'] = $cred['detail']['username'];
+  $credentials['password'] = $cred['detail']['password'];
+  $credentials = drupal_json_encode($credentials);
+
+  $options = [];
+  $options['headers']['Content-Type'] = 'application/json';
+  $options['headers']['X-CSRF-Token'] = $csrf_token;
+  $options['method'] = 'POST';
+  $options['data'] = $credentials;
+  unset ($credentials, $csrf_token);
+
+  $targetURL = $cred['detail']['baseurl'] . '/' . $cred['detail']['service_path'];
+  $response = drupal_http_request($targetURL . '/' . $cred['detail']['login_path'], $options);
+  unset ($targetURL);
+//  watchdog('getresponse', '<pre>@printr</pre>', array('@printr' => print_r($response, TRUE)));
+
+  // Check if login was successful
+  if ($response->code == 200) {
+    $data = json_decode($response->data);
+    if (!empty($data->session_name) && !empty($data->sessid)) {
+      $result = $data->session_name . '=' . $data->sessid;
+      $cred['cookie'] = $result;
+      $cred['csrf_token'] = $data->token;
+      $scheme = dncsessclient_content_type_schema_vars(TRUE, 'dncsessclientcreds');
+//      watchdog('scheme', '<pre>@printr</pre>', array('@printr' => print_r($scheme, TRUE)));
+      foreach ($scheme['fields'] as $keys => $values) {
+        if (in_array($keys, array('detail', 'cookie', 'csrf_token'))) {
+//          watchdog('thekey', '<pre>@printr</pre>', array('@printr' => print_r($keys, TRUE)));
+          $cred[$keys] = $keys == 'detail' ? json_encode($cred[$keys]) : $cred[$keys];
+          $cred[$keys] = encrypt($cred[$keys]);
+          $cred[$keys] = base64_encode($cred[$keys]);
+        }
+        elseif($keys == 'datetime') {
+          $cred[$keys] = date('Y-m-d H:i:s', time());
+        }
+      }
+//      watchdog('getresponse', '<pre>@printr</pre>', array('@printr' => print_r($cred, TRUE)));
+      module_load_include('inc', 'dncsystem', 'dncsystem.content');
+      dncsystem_content_update_data('dncsessclient', 'dncsessclientcreds', $cred);
+      unset ($scheme);
+    }
+    unset ($data);
+  }
+  unset ($response);
+  unset ($cred);
+  return $result;
+}
+
+function dncsessclient_logout($cred) {
+  if (empty($cred) || empty($cred['cookie']) || empty($cred['csrf_token'])) {
+    unset ($cred);
+    return;
+  }
+
+  $options = [];
+  $options['headers']['Content-Type'] = 'application/json';
+  $options['headers']['Cookie'] = $cred['cookie'];
+  $options['headers']['X-CSRF-Token'] = $cred['csrf_token'];
+  $options['method'] = 'POST';
+  $options['data'] = http_build_query(array(), '', '&');
+  // watchdog('getresponse', '<pre>@printr</pre>', array('@printr' => print_r($options, TRUE)));
+
+  $targetURL = $cred['detail']['baseurl'] . '/' . $cred['detail']['service_path'];
+  $response = drupal_http_request($targetURL . '/' . $cred['detail']['logout_path'], $options);
+  // watchdog('getresponse', '<pre>@printr</pre>', array('@printr' => print_r($response, TRUE)));
+  unset ($targetURL, $response, $options);
+
+  //delete saved cookie
+  $cred['cookie'] = NULL;
+  $cred['csrf_token'] = NULL;
+  $cred['datetime'] = NULL;
+  $cred['detail'] = json_encode($cred['detail']);
+  $cred['detail'] = encrypt($cred['detail']);
+  $cred['detail'] = base64_encode($cred['detail']);
+//  watchdog('getresponse', '<pre>@printr</pre>', array('@printr' => print_r($cred, TRUE)));
+  module_load_include('inc', 'dncsystem', 'dncsystem.content');
+  dncsystem_content_update_data('dncsessclient', 'dncsessclientcreds', $cred);
+  unset ($cred);
+}
+
+function dncsessclient_get_csrf_token($params) {
+  if (!empty($params['csrf_token'])) {
+    return $params['csrf_token'];
+  }
+  if (empty($params['baseurl'])
+      || empty($params['service_path'])
+      || empty($params['token_method_path'])) {
+    return;
+  }
+
+  $options = [];
+  $options['headers']['Content-Type'] = 'application/json';
+  $options['method'] = 'POST';
+  // $options['headers']['Cookie'] = $params['cookie'];
+  $options['data'] = http_build_query(array(), '', '&');
+
+  /* get csrf token */
+  $result = NULL;
+  // $response = drupal_http_request($params['targetURL'], $options);
+  $targetURL = $params['baseurl'] . '/' . $params['service_path'] . '/' . $params['token_method_path'];
+  $response = drupal_http_request($targetURL, $options);
+  unset ($options);
+  // watchdog('getcsrf', '<pre>@printr</pre>', array('@printr' => print_r($response, TRUE)));
+  if ($response->code == 200) {
+    $dump = json_decode($response->data);
+    $result = $dump->token;
+    unset ($dump);
+  }
+  unset ($response);
+  return $result;
+}
+
+function dncsessclient_login_form(array $form = array(), array $form_state = array(), $nid) {
+  $cred = dncsessclient_get_credentials($nid);
+  if (empty($cred)) {
+    unset ($cred);
+    drupal_set_message(t('No credential found by the ID :('), 'error', FALSE);
+    return $form;
+  }
+  if (!empty($cred['cookie'])) {
+    unset ($cred);
+    drupal_set_message(t('You\'ve been logged in :)'));
+    return $form;
+  }
+  unset ($cred);
+  $form['nid'] = array(
+    '#type' => 'value',
+    '#value' => $nid,
+  );
+  $question = t('Are you sure to login to the remote server') . ' ?!';
+  $path = 'admin/structure/dncsystem/dncsessclient';
+  $description = t('This action will get login to target remote server') . '<br /><br />';
+  $yes = t('Yes, login now please');
+  $no = '  ' . t('No! Back');
+  return confirm_form($form, $question, $path, $description, $yes, $no);
+}
+
+function dncsessclient_login_form_submit(&$form, &$form_state) {
+  form_state_values_clean($form_state);
+  $form_state['redirect'] = empty($_GET['destination']) ? 'admin/structure/dncsystem/dncsessclient' : $_GET['destination'];
+  unset ($_GET['destination']);
+  $cred = dncsessclient_get_credentials($form_state['values']['nid']);
+  dncsessclient_login($cred);
+  unset ($cred);
+  drupal_set_message(t('Login to the remote server done :)'));
+}
+
+function dncsessclient_logout_form(array $form = array(), array $form_state = array(), $nid) {
+  $cred = dncsessclient_get_credentials($nid);
+  if (empty($cred) || empty($cred['cookie'])) {
+    unset ($cred);
+    drupal_set_message(t('No credential found by the ID :('), 'error', FALSE);
+    return $form;
+  }
+  unset ($cred);
+  $form['nid'] = array(
+    '#type' => 'value',
+    '#value' => $nid,
+  );
+  $question = t('Are you sure to logout from the remote server') . ' ?!';
+  $path = 'admin/structure/dncsystem/dncsessclient';
+  $description = t('This action will get logout from remote server') . '<br /><br />';
+  $yes = t('Yes, logout now please');
+  $no = '  ' . t('No! Back');
+  return confirm_form($form, $question, $path, $description, $yes, $no);
+}
+
+function dncsessclient_logout_form_submit(&$form, &$form_state) {
+  form_state_values_clean($form_state);
+  $form_state['redirect'] = empty($_GET['destination']) ? 'admin/structure/dncsystem/dncsessclient' : $_GET['destination'];
+  unset ($_GET['destination']);
+  $cred = dncsessclient_get_credentials($form_state['values']['nid']);
+  dncsessclient_logout($cred);
+  unset ($cred);
+  drupal_set_message(t('Logout from the remote server done :)'));
+}
+
+function dncsessclient_remove_old_cookie() {
+  $creds = dncsessclient_get_credentials();
+  if (empty($creds)) {
+    unset ($creds);
+    return;
+  }
+
+  foreach ($creds as $keys => $values) {
+    if (empty($values['cookie']) || empty($values['datetime'])) {
+      continue;
+    }
+    $age = time() - strtotime($values['datetime']);
+    if ($age < (60 * 60)) {
+      unset ($age);
+      continue;
+    }
+    unset ($age);
+    dncsessclient_logout($values);
+  }
+  unset ($creds);
+}
+
+function dncsessclient_cron() {
+  dncsessclient_remove_old_cookie();
+}
+
+function dncsessclient_check_valid_cookie($cred) {
+  if (empty($cred['cookie']) || empty($cred['csrf_token'])) {
+    return;
+  }
+
+  if (time() - strtotime($cred['datetime']) > (60 * 60)) {
+    dncsessclient_logout($cred);
+    return;
+  }
+
+  $options = [];
+  $options['headers']['Content-Type'] = 'application/json';
+  $options['headers']['Cookie'] = $cred['cookie'];
+  $options['headers']['X-CSRF-Token'] = $cred['csrf_token'];
+  $options['method'] = 'POST';
+  $options['data'] = http_build_query(array(), '', '&');
+
+  $targetURL = $cred['detail']['baseurl'] . '/' . $cred['detail']['service_path'] . '/' . $cred['detail']['connect_path'] . '.json';
+  // $targetURL = 'http://localhost:8081/neomorowali/services/system/connect.json';
+  $response = drupal_http_request($targetURL, $options);
+  // return $response->data;
+  // watchdog('getresponse', '<pre>@printr</pre>', array('@printr' => print_r($response->data, TRUE)));
+
+  if ($response->code == 200) {
+    $data = json_decode($response->data, TRUE);
+    if (!empty($data['user']['uid']) && !empty($data['user']['name'])) {
+      unset ($data, $targetURL, $response, $options);
+      return TRUE;
+    }
+    unset ($data);
+  }
+  unset ($targetURL, $response, $options);
+  return;
+}

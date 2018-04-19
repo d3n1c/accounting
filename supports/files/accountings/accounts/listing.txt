@@ -1,0 +1,8 @@
+{"title":"Kas","code":"1001","description":"Akun untuk menyimpan data harta kas","normal":0,"nid":1}
+{"title":"Hutang","code":"2001","description":"Akun untuk menyimpan data hutang","normal":1,"nid":2}
+{"title":"Modal","code":"3001","description":"Akun untuk menyimpan data modal","normal":1,"nid":3}
+{"title":"Persediaan Barang Dagang","code":"1002","description":"Akun untuk menyimpan data harta persediaan barang dagang","normal":0,"nid":4}
+{"title":"Piutang","code":"1003","description":"Akun untuk menyimpan data harta piutang","normal":0,"nid":5}
+{"title":"Biaya","code":"4001","description":"Akun untuk menyimpan data biaya","normal":0,"nid":6}
+{"title":"HPP","code":"4002","description":"Harga Pokok Penjualan","normal":0,"nid":7}
+{"title":"Penjualan","code":"5001","description":"Akun untuk menyimpan data penjualan","normal":1,"nid":8}

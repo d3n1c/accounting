@@ -1,0 +1,736 @@
+<?php
+
+/*
+ * Copyright (C) 2018 denic
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+ */
+
+/**
+ * Implementation of hook_load
+ * @return arg
+ **/
+function dncstorage_load($arg) {
+  return check_plain($arg);
+}
+
+/**
+ * Implementation of hook_menu
+ *
+ * @return array
+ */
+function dncstorage_menu() {
+  $items = array();
+  $items['admin/config/dncsystem/dncstorage'] = array(
+    'title' => 'Storage of Assets',
+    'description' => 'Settings for DNC\'s System to handling storage of assets',
+    'position' => 'right',
+    'weight' => 0,
+    'page callback' => 'system_admin_menu_block_page',
+    'access arguments' => array('administer site configuration'),
+    'file' => 'system.admin.inc',
+    'file path' => drupal_get_path('module', 'system'),
+    );
+  $items['admin/config/dncsystem/dncstorage/global'] = array(
+    'title' => 'Global Params',
+    'description' => 'Storage of assets parameters and configurations',
+    'access arguments' => array('administer site configuration'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('dncstorage_admin_params'),
+    'file' => 'dncstorage.admin.inc',
+  );
+
+  return $items;
+}
+
+function dncstorage_get_max_id($type = NULL) {
+  $confs = variable_get('dncstorage_configs', array());
+  if (empty($confs['main_path'])) {
+    unset ($confs);
+    return;
+  }
+
+  $path = $confs['main_path'];
+  unset ($confs);
+  clearstatcache();
+  if (!is_dir($path)) {
+    unset ($path);
+    return;
+  }
+
+  $file = $path . DIRECTORY_SEPARATOR . 'maxids.json';
+  unset ($path);
+  clearstatcache();
+  if (!is_file($file)) {
+    unset ($file);
+    return;
+  }
+
+  $maxids = file_get_contents($file);
+  unset ($file);
+  $result = json_decode($maxids, TRUE);
+  unset ($maxids);
+  return empty($type) ? $result : (empty($result[$type]) ? 0 : $result[$type]);
+}
+
+function dncstorage_update_max_id($type, $nid) {
+  settype($nid, 'int');
+  
+  $confs = variable_get('dncstorage_configs', array());
+  if (empty($confs['main_path'])) {
+    unset ($confs);
+    return;
+  }
+
+  $maxids = dncstorage_get_max_id();
+
+  $path = $confs['main_path'];
+  unset ($confs);
+  file_prepare_directory($path, FILE_CREATE_DIRECTORY);
+  $file = $path . DIRECTORY_SEPARATOR . 'maxids.json';
+  unset ($path);
+  
+  if (empty($nid)) {
+    unset ($maxids[$type]);
+  }
+  else {
+    $maxids[$type] = $nid;
+  }
+  
+  clearstatcache();
+  if (is_file($file)) {
+    shell_exec('sed -i \'1s|^.*$|' . json_encode($maxids) . '|\' ' . $file);
+  }
+  else {
+    file_put_contents($file, json_encode($maxids), LOCK_EX);
+  }
+  unset ($maxids, $file);
+
+  return TRUE;
+}
+
+function dncstorage_update_bulk_max_id(array $data = []) {
+  if (empty($data)) {
+    return;
+  }
+  $confs = variable_get('dncstorage_configs', array());
+  if (empty($confs['main_path'])) {
+    unset ($confs);
+    return;
+  }
+
+  $path = $confs['main_path'];
+  unset ($confs);
+  file_prepare_directory($path, FILE_CREATE_DIRECTORY);
+  $file = $path . DIRECTORY_SEPARATOR . 'maxids.json';
+  unset ($path);
+
+  file_put_contents($file, json_encode($data), LOCK_EX);
+  unset ($maxids, $file);
+
+  return TRUE;
+}
+
+function dncstorage_get_type_path($type) {
+  $confs = variable_get('dncstorage_configs', array());
+  if (empty($confs['main_path'])) {
+    unset ($confs);
+    drupal_set_message(t('You need to set main configurations first :('), 'error', FALSE);
+    drupal_goto('admin/config/dncsystem/dncstorage/global');
+    return;
+  }
+
+  $path = $confs['main_path'];
+  unset ($confs);
+  clearstatcache();
+  if (!is_dir($path)) {
+    unset ($path);
+    return;
+  }
+
+  $path .= DIRECTORY_SEPARATOR . $type;
+  clearstatcache();
+  if (!is_dir($path)) {
+    unset ($path);
+    return;
+  }
+
+  return $path;
+}
+
+function dncstorage_get_listing($type, array $search = [], array $range = [], $justcount = FALSE, $reverse = FALSE) {
+  $path = dncstorage_get_type_path($type);
+  if (empty($path)) {
+    unset ($path);
+    return;
+  }
+
+  $path .= DIRECTORY_SEPARATOR . 'listing.txt';
+  clearstatcache();
+  if (!is_file($path)) {
+    unset ($path);
+    return;
+  }
+  
+  $max = shell_exec('sed -n \'$=\' ' . $path);
+  $max = trim($max);
+  settype($max, 'int');
+  if (empty($max)) {
+    unset ($max, $path);
+    return;
+  }
+
+  $range = empty($range) ? [0, 500] : $range;
+  settype($range[0], 'int');
+  settype($range[1], 'int');
+  $range[1] = empty($range[1]) ? 1 : $range[1];
+
+  $result = [];
+  if (!empty($search)) {
+    if ($search['type'] == 'string') {
+      if (!empty($justcount)) {
+        unset ($max);
+        $result = shell_exec('sed -n \'/' . $search['string'] . '/I=\' ' . $path . ' | wc -l');
+        settype($result, 'int');
+        return $result;
+      }
+      $lines = shell_exec('sed -n \'/' . $search['string'] . '/I=\' ' . $path);
+    }
+    else {
+      if (empty($search['fields'])) {
+        return $result;
+      }
+      $lines = [];
+      $lcount = [];
+      foreach ($search['fields'] as $keys => $values) {
+        $dump = shell_exec('sed -n \'/"' . $keys . '":' . (is_numeric($values) ? $values : '"' . $values . '"') . '/I=\' ' . $path);
+        if (!empty($dump)) {
+          $dump = explode("\n", $dump);
+          if (!empty($dump)) {
+            foreach ($dump as $value) {
+              if (!empty($value)) {
+                $value = trim($value);
+                settype($value, 'int');
+                $lcount[$value] = empty($lcount[$value]) ? 1 : ($lcount[$value] + 1);
+              }
+            }
+          }
+        }
+        unset ($dump);
+      }
+      foreach ($lcount as $keys => $values) {
+        if (empty($search['or'])) {
+          if ($values >= count($search['fields'])) {
+            $getit = TRUE;
+          }
+        }
+        else {
+          $getit = TRUE;
+        }
+        if (!empty($getit)) {
+          if (!in_array($keys, $lines)) {
+            $lines[] = $keys;
+          }
+        }
+        unset ($getit);
+      }
+      unset ($lcount);
+      
+      if (!empty($justcount)) {
+        return empty($lines) ? 0 : count($lines);
+      }
+    }
+    if (!is_array($lines) && is_string($lines)) {
+      $dump = explode("\n", $lines);
+      $lines = [];
+      foreach ($dump as $values) {
+        $values = trim($values);
+        settype($values, 'int');
+        if (!in_array($values, $lines)) {
+          $lines[] = $values;
+        }
+      }
+      unset ($dump);
+    }
+    if (!empty($lines)) {
+      if (empty($reverse)) {
+        $istart = $range[0];
+        $range[1] = $range[1] > count($lines) ? count($lines) : $range[1];
+        $istop = $istart + $range[1];
+      }
+      else {
+        $istart = count($lines) - ($range[0] + $range[1]);
+        $istop = $istart + $range[1];
+        if ($istart < 0) {
+          $istart = 0;
+        }
+      }
+      for ($i = $istart; $i < $istop; $i++) {
+        if (!empty($lines[$i])) {
+          $dump = shell_exec('sed \'' . $lines[$i] . '!d\' ' . $path);
+          if (!empty($dump)) {
+            $dump = json_decode($dump, TRUE);
+            if (!empty($dump['nid'])) {
+              $dmp = $dump;
+              unset ($dmp['nid']);
+              if (!empty($dmp)) {
+                $result[] = $dump;
+              }
+              unset ($dmp);
+            }
+          }
+          unset ($dump);
+        }
+      }
+      unset ($i, $istart, $istop);
+    }
+    unset ($lines);
+    
+    ksort($result);
+    if (!empty($reverse)) {
+      krsort($result);
+    }
+    return $result;
+  }
+
+  if (!empty($justcount)) {
+    return $max;
+  }
+  
+  if (empty($reverse)) {
+    $istart = $range[0];
+    $istop = $istart + $range[1];
+  }
+  else {
+    $istart = $max - ($range[0] + $range[1]);
+    $istop = $istart + $range[1];
+    if ($istart < 0) {
+      $istart = 0;
+    }
+  }
+  $istop = empty($istop) ? $max : ($istop > $max ? $max : $istop);
+  unset ($max);
+  
+  for ($i = $istart; $i < $istop; $i++) {
+    $buffer = shell_exec('sed \'' . ($i + 1) . '!d\' ' . $path);
+    $buffer = trim($buffer);
+    if (empty($buffer)) {
+      unset ($buffer);
+      continue;
+    }
+
+    $buffer = json_decode($buffer, TRUE);
+    if (!empty($buffer['nid'])) {
+      $dump = $buffer;
+      unset($dump['nid']);
+      if (!empty($dump)) {
+        $result[] = $buffer;
+      }
+      unset ($dump);
+    }
+    unset ($buffer);
+  }
+  unset ($i, $istart, $istop);
+
+  ksort($result);
+  if (!empty($reverse)) {
+    krsort($result);
+  }
+  return $result;
+}
+
+function dncstorage_get_data($type, $nid = NULL, array $search = [], $withexecutor = FALSE, array $range = [], $justcount = FALSE) {
+  $path = dncstorage_get_type_path($type);
+  if (empty($path)) {
+    unset ($path);
+    return;
+  }
+
+  if (!empty($nid)) {
+    if (!is_numeric($nid) && !is_string($nid)) {
+      unset ($path);
+      return;
+    }
+
+    $path .= DIRECTORY_SEPARATOR . 'states';
+    clearstatcache();
+    if (!is_dir($path)) {
+      unset ($path);
+      return;
+    }
+
+    $path .= DIRECTORY_SEPARATOR . $nid . '.json';
+    clearstatcache();
+    if (!is_file($path)) {
+      unset ($path);
+      return;
+    }
+
+    $return = file_get_contents($path);
+    $return = json_decode($return, TRUE);
+    if (empty($withexecutor)) {
+      unset ($return['creator'], $return['updater']);
+    }
+    return $return;
+  }
+
+  $path .= DIRECTORY_SEPARATOR . 'index.txt';
+  clearstatcache();
+  if (!is_file($path)) {
+    unset ($path);
+    return;
+  }
+
+//  module_load_include('inc', 'dncsystem', 'dncsystem.file');
+//  $max = dncsystem_file_get_max_lines($path);
+  $max = shell_exec('sed -n \'$=\' ' . $path);
+  if (empty($max)) {
+    unset ($max, $path);
+    return;
+  }
+  $max = trim($max);
+  settype($max, 'int');
+
+  $range = empty($range) ? [0, 500] : $range;
+  settype($range[0], 'int');
+  settype($range[1], 'int');
+  $range[1] = empty($range[1]) ? 1 : $range[1];
+
+  $result = [];
+  if (!empty($search)) {
+    if ($search['type'] == 'string') {
+      if (!empty($justcount)) {
+        unset ($max);
+        $result = shell_exec('sed -n \'/' . $search['string'] . '/I=\' ' . $path . ' | wc -l');
+        settype($result, 'int');
+        return $result;
+      }
+      $lines = shell_exec('sed -n \'/' . $search['string'] . '/I=\' ' . $path);
+    }
+    else {
+      $lines = [];
+      $lcount = [];
+      foreach ($search['fields'] as $keys => $values) {
+        $command = 'sed -n \'/"' . $keys . '":' . (is_int($values) || is_float($values) ? $values : '"' . $values . '"') . '[,\}]/I=\' ' . $path;
+//        $dump = shell_exec('sed -n \'/,"' . $keys . '":' . (is_int($values) || is_float($values) ? $values : '"' . $values . '"') . '[,\}]/I=\' ' . $path);
+        $dump = shell_exec($command);
+        unset ($command);
+        if (!empty($dump)) {
+          $dump = explode("\n", $dump);
+          if (!empty($dump)) {
+            foreach ($dump as $value) {
+              $value = trim($value);
+              settype($value, 'int');
+              $lcount[$value] = empty($lcount[$value]) ? 1 : ($lcount[$value] + 1);
+            }
+          }
+        }
+        unset ($dump);
+      }
+      foreach ($lcount as $keys => $values) {
+        if (empty($search['or'])) {
+          if ($values >= count($search['fields'])) {
+            $getit = TRUE;
+          }
+        }
+        else {
+          $getit = TRUE;
+        }
+        if (!empty($getit)) {
+          if (!in_array($keys, $lines)) {
+            $lines[] = $keys;
+          }
+        }
+      }
+      unset ($lcount);
+      
+      if (!empty($justcount)) {
+        return empty($lines) ? 0 : count($lines);
+      }
+    }
+    if (!is_array($lines) && is_string($lines)) {
+      $dump = explode("\n", $lines);
+      $lines = [];
+      foreach ($dump as $values) {
+        $values = trim($values);
+        settype($values, 'int');
+        if (!in_array($values, $lines)) {
+          $lines[] = $values;
+        }
+      }
+      unset ($dump);
+    }
+    if (!empty($lines)) {
+      $range[1] = $range[1] > count($lines) ? count($lines) : $range[1];
+      $lmax = $range[0] + $range[1];
+      for ($i = $range[0]; $i <= $range[1]; $i++) {
+        if (!empty($lines[$i])) {
+          $dump = shell_exec('sed \'' . $lines[$i] . '!d\' ' . $path);
+          if (!empty($dump)) {
+            $dump = json_decode($dump, TRUE);
+            if (!empty($dump['nid'])) {
+              $dmp = $dump;
+              unset ($dmp['nid']);
+              if (!empty($dmp)) {
+                if (empty($withexecutor)) {
+                  unset ($dump['creator'], $dump['updater']);
+                }
+                $result[$dump['nid']] = $dump;
+              }
+              unset ($dmp);
+            }
+          }
+          unset ($dump);
+        }
+      }
+      unset ($i);
+    }
+    unset ($lines);
+    return $result;
+  }
+  
+  $rmax = $range[0] + $range[1];
+  $max = empty($rmax) ? $max : ($rmax > $max ? $max : $rmax);
+  unset ($rmax);
+  
+  if (!empty($justcount)) {
+    return $max;
+  }
+  
+  for ($i = $range[0]; $i <= $max; $i++) {
+    $buffer = shell_exec('sed \'' . ($i + 1) . '!d\' ' . $path);
+//    $buffer = dncsystem_file_line_buffer($path, $i, FALSE);
+    $buffer = trim($buffer);
+    if (empty($buffer)) {
+      unset ($buffer);
+      continue;
+    }
+
+    $buffer = json_decode($buffer, TRUE);
+    if (!empty($buffer['nid'])) {
+      $dump = $buffer;
+      unset($dump['nid']);
+      if (!empty($dump)) {
+        if (empty($withexecutor)) {
+          unset ($buffer['creator'], $buffer['updater']);
+        }
+        $result[$buffer['nid']] = $buffer;
+      }
+      unset ($dump);
+    }
+    unset ($buffer);
+  }
+  unset ($range, $max);
+
+  return $result;
+}
+
+function dncstorage_get_line_by_nid($type, $scope, $nid) {
+  if (!in_array($scope, ['listing', 'index'])) {
+    return;
+  }
+
+  $path = dncstorage_get_type_path($type);
+  if (empty($path)) {
+    unset ($path);
+    return;
+  }
+
+  $file = $path . DIRECTORY_SEPARATOR . ($scope) . '.txt';
+  unset ($path);
+  clearstatcache();
+  if (!is_file($file)) {
+    unset ($file);
+    return;
+  }
+
+  $result = shell_exec('sed -n \'/,"nid":' . $nid . '[,\}]/=\' ' . $file);
+  unset ($file);
+  if (empty($result)) {
+    unset ($result);
+    return;
+  }
+  $result = trim($result);
+  settype($result, 'int');
+  return $result;
+}
+
+function dncstorage_update_direct($type, $scope, $line = NULL, array $data = [], $remove = FALSE) {
+  if (!in_array($scope, ['listing', 'index'])) {
+    return;
+  }
+  
+  if (empty($data) && empty($remove)) {
+    return;
+  }
+
+  $path = dncstorage_get_type_path($type);
+  if (empty($path)) {
+    unset ($path);
+    return;
+  }
+  $path .= DIRECTORY_SEPARATOR . ($scope) . '.txt';
+
+  clearstatcache();
+  if (!is_file($path)) {
+    if (empty($remove) && !empty($data)) {
+      file_put_contents($path, json_encode($data), LOCK_EX);
+    }
+    unset ($path);
+    return;
+  }
+
+  if (empty($line)) {
+    if (empty($remove) && !empty($data)) {
+      file_put_contents($path, "\n" . json_encode($data), FILE_APPEND | LOCK_EX);
+    }
+    unset ($path);
+    return;
+  }
+
+  if (!empty($remove)) {
+    shell_exec('sed -i \'' . $line . 'd\' ' . $path);
+    $result = TRUE;
+  }
+  else {
+    if (!empty($data)) {
+      shell_exec('sed -i \'' . $line . 's|^.*$|' . json_encode($data) . '|\' ' . $path);
+      $result = TRUE;
+    }
+  }
+  unset ($path, $command);
+  return empty($result) ? FALSE : TRUE;
+}
+
+function dncstorage_update_data($type, $uid, array $data = []) {
+  if (empty($data['nid'])) {
+    return;
+  }
+
+  $confs = variable_get('dncstorage_configs', array());
+  if (empty($confs['main_path'])) {
+    unset ($confs);
+    drupal_set_message(t('You need to set main configurations first :('), 'error', FALSE);
+    drupal_goto('admin/config/dncsystem/dncstorage/global');
+    return;
+  }
+  
+  $data['updated'] = time();
+  $data['updater'] = $uid;
+  if (empty($data['creator'])) {
+    $data['creator'] = $uid;
+    $data['created'] = time();
+  }
+
+  $path = $confs['main_path'];
+  unset ($confs);
+  file_prepare_directory($path, FILE_CREATE_DIRECTORY);
+  $path .= DIRECTORY_SEPARATOR . $type;
+  file_prepare_directory($path, FILE_CREATE_DIRECTORY);
+  $file = $path . DIRECTORY_SEPARATOR . 'states';
+  file_prepare_directory($file, FILE_CREATE_DIRECTORY);
+  $file .= DIRECTORY_SEPARATOR . $data['nid'] . '.json';
+
+  file_put_contents($file, json_encode($data), LOCK_EX);
+  unset ($file);
+
+  $file = $path . DIRECTORY_SEPARATOR . 'logs';
+  file_prepare_directory($file, FILE_CREATE_DIRECTORY);
+  $file .= DIRECTORY_SEPARATOR . $data['nid'] . '.txt';
+
+  clearstatcache();
+  if (is_file($file)) {
+    $newline = TRUE;
+  }
+
+  file_put_contents($file, (empty($newline) ? NULL : "\n") . json_encode($data), FILE_APPEND | LOCK_EX);
+  unset ($newline);
+
+  $line = dncstorage_get_line_by_nid($type, 'index', $data['nid']);
+  dncstorage_update_direct($type, 'index', $line, $data);
+  unset ($line);
+
+  return $data;
+}
+
+function dncstorage_drop_single_data($type, $uid, $nid) {
+  $path = dncstorage_get_type_path($type);
+  if (empty($path)) {
+    unset ($path);
+    return;
+  }
+
+  $state = $path . DIRECTORY_SEPARATOR . 'states';
+  clearstatcache();
+  if (!is_dir($state)) {
+    unset ($state);
+    return;
+  }
+
+  $file = $state . DIRECTORY_SEPARATOR . $nid . '.json';
+  clearstatcache();
+  if (!is_file($file)) {
+    unset ($path, $state, $file);
+    return;
+  }
+
+  $udata = [];
+  $udata['nid'] = $nid;
+  $data = dncstorage_get_data($type, $nid, [], TRUE);
+  if (!empty($data['creator'])) {
+    $udata['creator'] = $data['creator'];
+    $udata['created'] = $data['created'];
+  }
+  unset ($data);
+
+  $drop = $path . DIRECTORY_SEPARATOR . 'drops';
+  file_prepare_directory($drop, FILE_CREATE_DIRECTORY);
+  $dfile = $drop . DIRECTORY_SEPARATOR . $nid . '.json';
+  rename($file, $dfile);
+  unset ($file, $dfile);
+
+  $log = $path . DIRECTORY_SEPARATOR . 'logs';
+  file_prepare_directory($log, FILE_CREATE_DIRECTORY);
+
+  $udata['deleted'] = time();
+  $udata['deleter'] = $uid;
+  $udata['updated'] = time();
+  $udata['updater'] = $uid;
+  $updated = $log . DIRECTORY_SEPARATOR . $nid . '.txt';
+  file_put_contents($updated, "\n" . json_encode($udata), FILE_APPEND | LOCK_EX);
+  unset ($path, $state, $log, $updated);
+  return $udata;
+}
+
+function dncstorage_delete_data($type, $uid, $nid) {
+  $nid = !is_array($nid) ? [$nid] : $nid;
+
+  $result = [];
+  foreach ($nid as $values) {
+    $line = dncstorage_get_line_by_nid($type, 'index', $values);
+    if (!empty($line)) {
+      $drop = dncstorage_drop_single_data($type, $uid, $values);
+      if (!empty($drop)) {
+        $result[] = $drop;
+        dncstorage_update_direct($type, 'index', $line, [], TRUE);
+      }
+      unset ($drop);
+    }
+    unset ($line);
+  }
+
+  return empty($result) ? FALSE : TRUE;
+}
+

@@ -542,10 +542,10 @@ function accounting_set_default_scenarios() {
   $themsettings['toggle_main_menu'] = 0;
   $themsettings['toggle_secondary_menu'] = 0;
   $themsettings['bootstrap_cdn_provider'] = 'custom';
-  $themsettings['bootstrap_cdn_custom_css'] = base_path() . 'sites/all/libraries/bootstrap/css/bootstrap.css';
-  $themsettings['bootstrap_cdn_custom_css_min'] = base_path() . 'sites/all/libraries/bootstrap/css/bootstrap.min.css';
-  $themsettings['bootstrap_cdn_custom_js'] = base_path() . 'sites/all/libraries/bootstrap/js/bootstrap.js';
-  $themsettings['bootstrap_cdn_custom_js_min'] = base_path() . 'sites/all/libraries/bootstrap/js/bootstrap.min.js';
+  $themsettings['bootstrap_cdn_custom_css'] = base_path() . 'profiles/accounting/libraries/bootstrap/dist/css/bootstrap.css';
+  $themsettings['bootstrap_cdn_custom_css_min'] = base_path() . 'profiles/accounting/libraries/bootstrap/dist/css/bootstrap.min.css';
+  $themsettings['bootstrap_cdn_custom_js'] = base_path() . 'profiles/accounting/libraries/bootstrap/dist/js/bootstrap.js';
+  $themsettings['bootstrap_cdn_custom_js_min'] = base_path() . 'profiles/accounting/libraries/bootstrap/dist/js/bootstrap.min.js';
   variable_set('theme_dnccoreui_settings', $themsettings);
   unset ($themsettings);
 }

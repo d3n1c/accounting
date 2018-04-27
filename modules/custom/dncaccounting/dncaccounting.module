@@ -726,7 +726,7 @@ function dncaccounting_show_balances_block() {
   
   $output = [];
   $profit = dncaccounting_get_profit();
-  $output[] = '<h4><strong style="color: ' . ($profit < 0 ? 'red;">' . t('Lost') : 'black;">' . t('Profit')) . ': ' . number_format($profit, 0, ',', '.') . '</strong></h4>';
+  $output[] = '<h4><strong' . ($profit < 0 ? ' style="color: red; background: white;">' . t('Lost') : '>' . t('Profit')) . ': ' . number_format($profit, 0, ',', '.') . '</strong></h4>';
   
   $output[] = implode("\n", $aoutput);
   unset ($aoutput);

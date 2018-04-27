@@ -32,7 +32,7 @@ function accounting_nomenclatures() {
     'site_mail' => 'site@examle.org',
     'date_default_time_zone' => 'Asia/Makassar',
     'site_default_country' => 'ID',
-    'clean_url' => 1,
+    'clean_url' => 0,
     'install_time' => $_SERVER['REQUEST_TIME'],
   ];
 }

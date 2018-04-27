@@ -1,3 +1,5 @@
+<?php $cleanurl = variable_get('clean_url', 0); ?>
+
 <header class="app-header navbar">
   <button class="navbar-toggler mobile-sidebar-toggler d-lg-none mr-auto" type="button">
     <span class="navbar-toggler-icon"></span>
@@ -42,11 +44,11 @@
               <strong><?php echo t('@user\'s Account', ['@user' => $GLOBALS['user']->name]); ?></strong>
             </div>
             <?php foreach ($auth_user['menus'] as $keys => $values) { ?>
-              <a class="dropdown-item" href="<?php echo (preg_match('/^http/i', $values['href']) ? NULL : base_path()) . $values['href']; ?>"><i class="fa <?php echo preg_match('/logout/i', $values['href']) ? 'fa-sign-out' : 'fa-circle-thin'; ?>"></i> <?php echo t($values['title']); ?></a>
+              <a class="dropdown-item" href="<?php echo (preg_match('/^http/i', $values['href']) ? NULL : (!empty($cleanurl) && !empty($values['#href']) && $values['#href'] != '<front>' && $values['#href'] != '/' ? base_path() : '?q=')) . $values['href']; ?>"><i class="fa <?php echo preg_match('/logout/i', $values['href']) ? 'fa-sign-out' : 'fa-circle-thin'; ?>"></i> <?php echo t($values['title']); ?></a>
             <?php } ?>
           <?php } ?>
         <?php } else { ?>
-          <a class="dropdown-item" href="<?php echo base_path(); ?>user/login"><i class="fa fa-sign-in"></i> <?php echo t('Login'); ?></a>
+          <a class="dropdown-item" href="<?php echo (!empty($cleanurl) ? base_path() : '?q='); ?>user/login"><i class="fa fa-sign-in"></i> <?php echo t('Login'); ?></a>
         <?php } ?>
       </div>
     </li>
@@ -56,3 +58,5 @@
   </button>
 
 </header>
+
+<?php unset($cleanurl); ?>

@@ -178,6 +178,7 @@ function dnccoreui_process_page(&$variables) {
     $variables['auth_user']['menus'] = menu_navigation_links('user-menu');
   }
 
+  $cleanurl = variable_get('clean_url', 0);
   $menus = [];
   foreach ($variables['page']['sidebar_first'] as $keys => $values) {
     if (!is_array($values)) {
@@ -201,13 +202,13 @@ function dnccoreui_process_page(&$variables) {
               }
               $val['#title'] = $val['#title'] . (preg_match('~<i ~', $val['#title']) ? NULL : ' <i class="icon-options"></i>');
               $menus[$value['#original_link']['menu_name']][$key]['#children'][$o]['#title'] = $val['#title'];
-              $menus[$value['#original_link']['menu_name']][$key]['#children'][$o]['#href'] = (preg_match('/^http/i', $val['#href']) ? NULL : base_path()) . $val['#href'];
+              $menus[$value['#original_link']['menu_name']][$key]['#children'][$o]['#href'] = (preg_match('/^http/i', $val['#href']) ? NULL : (!empty($cleanurl) && $val['#href'] != '<front>' ? base_path() : '?q=')) . $val['#href'];
               $o++;
             }
             unset($o);
           }
           else {
-            $menus[$value['#original_link']['menu_name']][$key]['#href'] = (preg_match('/^http/i', $value['#href']) ? NULL : base_path()) . ($value['#href'] == '<front>' ? NULL : $value['#href']);
+            $menus[$value['#original_link']['menu_name']][$key]['#href'] = (preg_match('/^http/i', $value['#href']) ? NULL : (!empty($cleanurl) && $value['#href'] != '<front>' ? base_path() : '?q=')) . ($value['#href'] == '<front>' ? NULL : $value['#href']);
           }
         }
         else {
@@ -220,7 +221,8 @@ function dnccoreui_process_page(&$variables) {
     }
   }
   $variables['sidebar_first_menus'] = $menus;
-  unset ($i, $menus);
+//  echo '<pre>'; print_r($variables['sidebar_first_menus']); echo '</pre>'; exit;
+  unset ($i, $menus, $cleanurl);
 
   if (!empty($variables['tabs']['#primary'])) {
     $tdump = $variables['tabs']['#primary'];
